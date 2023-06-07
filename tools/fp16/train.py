@@ -128,7 +128,7 @@ def main():
                 print(_module_path)
                 plg_lib = importlib.import_module(_module_path)
             
-            from projects.mmdet3d_plugin.bevformer.apis import custom_train_model
+            from projects_bevcam.mmdet3d_plugin.bevformer.apis import custom_train_model
     # set cudnn_benchmark
     if cfg.get('cudnn_benchmark', False):
         torch.backends.cudnn.benchmark = True
@@ -229,7 +229,7 @@ def main():
     eval_model.load_state_dict(model.state_dict())
 
     logger.info(f'Model:\n{model}')
-    from projects.mmdet3d_plugin.datasets import custom_build_dataset
+    from projects_bevcam.mmdet3d_plugin.datasets import custom_build_dataset
     datasets = [custom_build_dataset(cfg.data.train)]
     if len(cfg.workflow) == 2:
         val_dataset = copy.deepcopy(cfg.data.val)

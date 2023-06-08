@@ -11,7 +11,8 @@ plugin_dir = 'projects_bevcam/mmdet3d_plugin/'
 point_cloud_range = [-51.2, -51.2, -5.0, 51.2, 51.2, 3.0]
 voxel_size = [0.2, 0.2, 8]
 
-
+seed=17
+deterministic=False
 
 img_norm_cfg = dict(
     mean=[103.530, 116.280, 123.675], std=[1.0, 1.0, 1.0], to_rgb=False)
@@ -39,7 +40,8 @@ queue_length = 4 # each sequence contains `queue_length` frames.
 model = dict(
     type='BEVFormer',
     use_grid_mask=True,
-    video_test_mode=True,
+    # video_test_mode=True,
+    video_test_mode=False,
     img_backbone=dict(
         type='ResNet',
         depth=101,
@@ -126,7 +128,7 @@ model = dict(
                     operation_order=('self_attn', 'norm', 'cross_attn', 'norm',
                                      'ffn', 'norm')))),
         bbox_coder=dict(
-            type='NMSFreeCoder',
+            type='NMSFreeCoder_gti',
             post_center_range=[-61.2, -61.2, -10.0, 61.2, 61.2, 10.0],
             pc_range=point_cloud_range,
             max_num=300,
@@ -153,7 +155,7 @@ model = dict(
         point_cloud_range=point_cloud_range,
         out_size_factor=4,
         assigner=dict(
-            type='HungarianAssigner3D',
+            type='HungarianAssigner3D_v3',
             cls_cost=dict(type='FocalLossCost', weight=2.0),
             reg_cost=dict(type='BBox3DL1Cost', weight=0.25),
             iou_cost=dict(type='IoUCost', weight=0.0), # Fake cost. This is just to make it compatible with DETR head.
@@ -178,6 +180,7 @@ train_pipeline = [
 
 test_pipeline = [
     dict(type='LoadMultiViewImageFromFiles_v2', to_float32=True),
+    dict(type='LoadAnnotations3D', with_bbox_3d=True, with_label_3d=True, with_attr_label=False),
     dict(type='NormalizeMultiviewImage', **img_norm_cfg),
     dict(type='PadMultiViewImage', size_divisor=32),
     dict(
@@ -190,7 +193,7 @@ test_pipeline = [
                 type='DefaultFormatBundle3D_v2',
                 class_names=class_names,
                 with_label=False),
-            dict(type='CustomCollect3D', keys=['img'])
+            dict(type='CustomCollect3D', keys=['img', 'gt_bboxes_3d', 'gt_labels_3d'])
         ])
 ]
 

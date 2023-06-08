@@ -268,25 +268,37 @@ class BEVFormer(MVXTwoStageDetector):
         self.prev_frame_info['prev_bev'] = new_prev_bev
         return bbox_results
 
-    def simple_test_pts(self, x, img_metas, prev_bev=None, rescale=False):
+    def simple_test_pts(self, x, img_metas, prev_bev=None, rescale=False, 
+                        gt_labels_3d=[None],  gt_bboxes_3d=[None], **kwargs):
         """Test function"""
         outs = self.pts_bbox_head(x, img_metas, prev_bev=prev_bev)
 
         bbox_list = self.pts_bbox_head.get_bboxes(
-            outs, img_metas, rescale=rescale)
-        bbox_results = [
-            bbox3d2result(bboxes, scores, labels)
-            for bboxes, scores, labels in bbox_list
-        ]
+            outs, img_metas, rescale=rescale,
+            gt_labels_list=gt_labels_3d[0], 
+            gt_bboxes_list=gt_bboxes_3d[0], 
+            gt_bboxes_ignore_list=None
+        )
+        # bbox_results = [
+        #     bbox3d2result(bboxes, scores, labels)
+        #     for bboxes, scores, labels, obj_gt_indices in bbox_list
+        # ]
+        bbox_results = []
+        for bboxes, scores, labels, obj_gt_indices in bbox_list:
+            rst_dict = bbox3d2result(bboxes, scores, labels)
+            rst_dict['obj_gt_indices'] = obj_gt_indices.cpu()
+            bbox_results.append(rst_dict)
+
+
         return outs['bev_embed'], bbox_results
 
-    def simple_test(self, img_metas, img=None, prev_bev=None, rescale=False):
+    def simple_test(self, img_metas, img=None, prev_bev=None, rescale=False, **kwargs):
         """Test function without augmentaiton."""
         img_feats = self.extract_feat(img=img, img_metas=img_metas)
 
         bbox_list = [dict() for i in range(len(img_metas))]
         new_prev_bev, bbox_pts = self.simple_test_pts(
-            img_feats, img_metas, prev_bev, rescale=rescale)
+            img_feats, img_metas, prev_bev, rescale=rescale, **kwargs)
         for result_dict, pts_bbox in zip(bbox_list, bbox_pts):
             result_dict['pts_bbox'] = pts_bbox
         return new_prev_bev, bbox_list

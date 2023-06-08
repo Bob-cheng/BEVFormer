@@ -274,7 +274,8 @@ class BEVFormerHead(DETRHead):
                                     dtype=torch.long)
         labels[pos_inds] = gt_labels[sampling_result.pos_assigned_gt_inds]
         label_weights = gt_bboxes.new_ones(num_bboxes)
-
+        obj_gt_indices = -1 * gt_bboxes.new_ones(num_bboxes, dtype=torch.long)
+        obj_gt_indices[pos_inds] = sampling_result.pos_assigned_gt_inds
         # bbox targets
         bbox_targets = torch.zeros_like(bbox_pred)[..., :gt_c]
         bbox_weights = torch.zeros_like(bbox_pred)
@@ -283,7 +284,7 @@ class BEVFormerHead(DETRHead):
         # DETR
         bbox_targets[pos_inds] = sampling_result.pos_gt_bboxes
         return (labels, label_weights, bbox_targets, bbox_weights,
-                pos_inds, neg_inds)
+                pos_inds, neg_inds, obj_gt_indices)
 
     def get_targets(self,
                     cls_scores_list,
@@ -328,13 +329,13 @@ class BEVFormerHead(DETRHead):
         ]
 
         (labels_list, label_weights_list, bbox_targets_list,
-         bbox_weights_list, pos_inds_list, neg_inds_list) = multi_apply(
+         bbox_weights_list, pos_inds_list, neg_inds_list, obj_gt_indices_list) = multi_apply(
             self._get_target_single, cls_scores_list, bbox_preds_list,
             gt_labels_list, gt_bboxes_list, gt_bboxes_ignore_list)
         num_total_pos = sum((inds.numel() for inds in pos_inds_list))
         num_total_neg = sum((inds.numel() for inds in neg_inds_list))
         return (labels_list, label_weights_list, bbox_targets_list,
-                bbox_weights_list, num_total_pos, num_total_neg)
+                bbox_weights_list, num_total_pos, num_total_neg, obj_gt_indices_list)
 
     def loss_single(self,
                     cls_scores,
@@ -367,7 +368,7 @@ class BEVFormerHead(DETRHead):
                                            gt_bboxes_list, gt_labels_list,
                                            gt_bboxes_ignore_list)
         (labels_list, label_weights_list, bbox_targets_list, bbox_weights_list,
-         num_total_pos, num_total_neg) = cls_reg_targets
+         num_total_pos, num_total_neg, obj_gt_indices_list) = cls_reg_targets
         labels = torch.cat(labels_list, 0)
         label_weights = torch.cat(label_weights_list, 0)
         bbox_targets = torch.cat(bbox_targets_list, 0)
@@ -494,7 +495,8 @@ class BEVFormerHead(DETRHead):
         return loss_dict
 
     @force_fp32(apply_to=('preds_dicts'))
-    def get_bboxes(self, preds_dicts, img_metas, rescale=False):
+    def get_bboxes(self, preds_dicts, img_metas, rescale=False, 
+                   gt_labels_list=None, gt_bboxes_list=None, gt_bboxes_ignore_list=None):
         """Generate bboxes from bbox head predictions.
         Args:
             preds_dicts (tuple[list[dict]]): Prediction results.
@@ -502,8 +504,26 @@ class BEVFormerHead(DETRHead):
         Returns:
             list[dict]: Decoded bbox, scores and labels after nms.
         """
+        if gt_labels_list is not None:
+            cls_scores = preds_dicts['all_cls_scores'][-1]
+            bbox_preds = preds_dicts['all_bbox_preds'][-1]
 
-        preds_dicts = self.bbox_coder.decode(preds_dicts)
+            device = gt_labels_list[0].device
+            gt_bboxes_list = [torch.cat(
+                (gt_bboxes.gravity_center, gt_bboxes.tensor[:, 3:]),
+                dim=1).to(device) for gt_bboxes in gt_bboxes_list]
+
+            num_imgs = cls_scores.size(0)
+            cls_scores_list = [cls_scores[i] for i in range(num_imgs)]
+            bbox_preds_list = [bbox_preds[i] for i in range(num_imgs)]
+
+            cls_reg_targets = self.get_targets(cls_scores_list, bbox_preds_list,
+                                            gt_bboxes_list, gt_labels_list,
+                                            gt_bboxes_ignore_list)
+            obj_gt_indices_list = cls_reg_targets[-1]
+        else:
+            obj_gt_indices_list = None
+        preds_dicts = self.bbox_coder.decode(preds_dicts, obj_gt_indices_list)
 
         num_samples = len(preds_dicts)
         ret_list = []
@@ -517,7 +537,7 @@ class BEVFormerHead(DETRHead):
             bboxes = img_metas[i]['box_type_3d'](bboxes, code_size)
             scores = preds['scores']
             labels = preds['labels']
-
-            ret_list.append([bboxes, scores, labels])
+            obj_gt_indices = preds['obj_gt_indices']
+            ret_list.append([bboxes, scores, labels, obj_gt_indices])
 
         return ret_list
